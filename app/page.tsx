@@ -25,12 +25,16 @@ import {
 } from "lucide-react";
 import { repository } from "@/lib/repository";
 import { seedData } from "@/lib/seed";
-import { AppData, PaginationPage, SlideDraft, SlideReference, StyleDraft } from "@/lib/types";
+import { AppData, PaginationPage, SlideDraft, SlideReference } from "@/lib/types";
 
-type Tab = "recommend" | "library" | "style";
+type Tab = "recommend" | "library";
 type ImportMode = "replace" | "append";
 type SlideTagText = Pick<SlideDraft, "roleTags" | "structureTags" | "elementTags">;
-type StyleTagText = Pick<StyleDraft, "colors" | "styleTags">;
+type TitleAlign = "left" | "center" | "right";
+type DesignAttrs = { mainColor: string; subColor: string; titleAlign: TitleAlign };
+
+const DEFAULT_DESIGN_ATTRS: DesignAttrs = { mainColor: "#1e293b", subColor: "#3b82f6", titleAlign: "left" };
+const DESIGN_ATTRS_KEY = "ppt-reference:design:v1";
 
 const emptySlideDraft: SlideDraft = {
   title: "",
@@ -44,23 +48,10 @@ const emptySlideDraft: SlideDraft = {
   memo: ""
 };
 
-const emptyStyleDraft: StyleDraft = {
-  title: "",
-  tone: "",
-  colors: [],
-  layoutNotes: "",
-  styleTags: []
-};
-
 const emptySlideTagText: Record<keyof SlideTagText, string> = {
   roleTags: "",
   structureTags: "",
   elementTags: ""
-};
-
-const emptyStyleTagText: Record<keyof StyleTagText, string> = {
-  colors: "",
-  styleTags: ""
 };
 
 const TAG_ALIASES: Record<string, string> = {
@@ -258,7 +249,7 @@ function layoutInstruction(slide: SlideReference | undefined, page: PaginationPa
   if (has(["그리드", "썸네일"])) {
     return "본문을 3~6개 카드 그리드로 구성한다. 각 카드는 작은 이미지/아이콘 자리, 짧은 제목, 1줄 설명을 포함한다.";
   }
-  return "본문을 3개 핵심 카드형 레이아웃으로 구성한다. 각 카드는 아이콘, 짧은 소제목, 2줄 설명으로 구성하고, 하단에는 전체를 요약하는 핵심 메시지 바를 둔다.";
+  return "본문을 카드형 레이아웃으로 구성한다. 카드 개수는 페이지 내용에 맞게 결정한다. 각 카드는 아이콘, 짧은 소제목, 2줄 설명으로 구성하고, 하단에는 전체를 요약하는 핵심 메시지 바를 둔다.";
 }
 
 function elementInstruction(slide: SlideReference | undefined) {
@@ -272,7 +263,7 @@ function elementInstruction(slide: SlideReference | undefined) {
   return parts.length ? `${parts.join(". ")}.` : "아이콘, 카드, 강조 박스는 최소한으로 사용한다.";
 }
 
-function buildPrompt(page: PaginationPage | null, slides: SlideReference[], styleTitle: string) {
+function buildPrompt(page: PaginationPage | null, slides: SlideReference[], design: DesignAttrs) {
   const primary = slides[0];
   const secondary = slides.slice(1, 3).filter((s) => s.memo || s.elementTags.length);
   const secondarySection = secondary.length
@@ -291,8 +282,13 @@ ${layoutInstruction(primary, page)}
 ${elementInstruction(primary)}${secondarySection}
 
 [VISUAL STYLE]
-${styleTitle || (primary ? joinTags(primary.styleTags) : "보고서형, 정돈된 레이아웃, 과하지 않은 시각 요소")}
-흰색 또는 아주 옅은 배경, 선명한 제목, 균형 잡힌 여백, 과하지 않은 색상 사용.
+메인 컬러: ${design.mainColor} / 서브 컬러: ${design.subColor} / 타이틀 정렬: ${{ left: "왼쪽", center: "가운데", right: "오른쪽" }[design.titleAlign]}
+폰트: Pretendard, 제목 36pt, 본문 12pt
+텍스트·아이콘·도형·카드·표·이미지는 영역을 명확히 분리한다.
+아이콘·도형은 단순 벡터 스타일, 단색 또는 2색 이내로 유지한다.
+정보 계층을 명확히 하고 카드·섹션 경계를 분명하게 한다.
+선은 너무 얇지 않게 유지한다.
+텍스트는 맞춤법 검사를 적용한다.
 
 [STEP 1 — 텍스트 초안]
 위 레이아웃 구조에 맞춰 슬라이드에 들어갈 텍스트를 먼저 작성한다.
@@ -487,10 +483,13 @@ export default function Home() {
   const [message, setMessage] = useState("");
   const [slideDraft, setSlideDraft] = useState<SlideDraft>(emptySlideDraft);
   const [slideTagText, setSlideTagText] = useState(emptySlideTagText);
-  const [styleDraft, setStyleDraft] = useState<StyleDraft>(emptyStyleDraft);
-  const [styleTagText, setStyleTagText] = useState(emptyStyleTagText);
   const [slideFile, setSlideFile] = useState<File>();
-  const [styleFile, setStyleFile] = useState<File>();
+  const [designAttrs, setDesignAttrs] = useState<DesignAttrs>(() => {
+    if (typeof window === "undefined") return DEFAULT_DESIGN_ATTRS;
+    try { return { ...DEFAULT_DESIGN_ATTRS, ...JSON.parse(localStorage.getItem(DESIGN_ATTRS_KEY) || "{}") }; }
+    catch { return DEFAULT_DESIGN_ATTRS; }
+  });
+  const [showDesign, setShowDesign] = useState(false);
   const [copied, setCopied] = useState(false);
   const [aiStatus, setAiStatus] = useState("AI 분석 준비 상태 확인 중...");
   const [showAllSlides, setShowAllSlides] = useState(false);
@@ -557,8 +556,13 @@ export default function Home() {
   }, [effectiveQuery, filteredSlides, scoredSlides, showAllSlides]);
   const prompt = useMemo(() => {
     const slides = appliedSlides.length ? appliedSlides : selectedSlide ? [selectedSlide] : [];
-    return buildPrompt(selectedPage, slides, data.styles[0]?.title || "");
-  }, [appliedSlides, selectedPage, selectedSlide, data.styles]);
+    return buildPrompt(selectedPage, slides, designAttrs);
+  }, [appliedSlides, selectedPage, selectedSlide, designAttrs]);
+
+  function updateDesignAttrs(next: DesignAttrs) {
+    setDesignAttrs(next);
+    localStorage.setItem(DESIGN_ATTRS_KEY, JSON.stringify(next));
+  }
 
   async function commit(next: AppData) {
     setData(next);
@@ -724,7 +728,9 @@ export default function Home() {
       ...editSlideDraft,
       roleTags: splitTags(editSlideTagText.roleTags),
       structureTags: splitTags(editSlideTagText.structureTags),
-      elementTags: splitTags(editSlideTagText.elementTags)
+      elementTags: splitTags(editSlideTagText.elementTags),
+      layoutTags: [],
+      styleTags: []
     };
     await commit({ ...data, slides: data.slides.map((s) => (s.id === editingSlideId ? updated : s)) });
     setEditingSlideId(null);
@@ -755,26 +761,6 @@ export default function Home() {
     }
   }
 
-  async function addStyle() {
-    if (!styleDraft.title.trim()) return setMessage("디자인 레퍼런스 제목은 필수입니다.");
-    setSaving(true);
-    try {
-      const next = await repository.addStyle(data, {
-        ...styleDraft,
-        colors: splitTags(styleTagText.colors),
-        styleTags: splitTags(styleTagText.styleTags)
-      }, styleFile);
-      setData(next);
-      setStyleDraft(emptyStyleDraft);
-      setStyleTagText(emptyStyleTagText);
-      setStyleFile(undefined);
-      setMessage("디자인 레퍼런스를 등록했습니다.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "디자인 등록 실패");
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function copyPrompt() {
     await navigator.clipboard.writeText(prompt);
@@ -853,8 +839,7 @@ export default function Home() {
         <div className="mb-3 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
           {[
             ["recommend", "추천 탐색", Sparkles],
-            ["library", "장표 등록", ImagePlus],
-            ["style", "디자인 등록", Layers3]
+            ["library", "장표 등록", ImagePlus]
           ].map(([key, label, Icon]) => (
             <button
               key={String(key)}
@@ -1160,40 +1145,6 @@ export default function Home() {
               </div>
             )}
 
-            {tab === "style" && (
-              <div className="rounded-lg border bg-white p-4">
-                <h2 className="mb-1 text-lg font-semibold">디자인 레퍼런스 등록</h2>
-                <p className="mb-4 text-sm text-slate-500">스타일 방향은 추천 장표보다 GPT 프롬프트의 톤을 잡는 데 사용합니다.</p>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <label className="flex min-h-48 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed bg-slate-50 text-sm text-slate-500">
-                    <Upload className="mb-2 h-6 w-6" />
-                    디자인 이미지 업로드
-                    <input type="file" accept="image/*" className="hidden" onChange={(event) => setStyleFile(event.target.files?.[0])} />
-                    {styleFile && <span className="mt-2 text-xs text-slate-700">{styleFile.name}</span>}
-                  </label>
-                  <div className="space-y-2">
-                    <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="스타일 제목" value={styleDraft.title} onChange={(event) => setStyleDraft({ ...styleDraft, title: event.target.value })} />
-                    <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="톤: 신뢰감, 미래지향" value={styleDraft.tone} onChange={(event) => setStyleDraft({ ...styleDraft, tone: event.target.value })} />
-                    <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="색상: #1f2937, #2563eb" value={styleTagText.colors} onChange={(event) => setStyleTagText({ ...styleTagText, colors: event.target.value })} />
-                    <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="스타일 태그" value={styleTagText.styleTags} onChange={(event) => setStyleTagText({ ...styleTagText, styleTags: event.target.value })} />
-                  </div>
-                  <textarea className="min-h-24 rounded-lg border px-3 py-2 text-sm md:col-span-2" placeholder="레이아웃/무드 메모" value={styleDraft.layoutNotes} onChange={(event) => setStyleDraft({ ...styleDraft, layoutNotes: event.target.value })} />
-                  <Button className="md:col-span-2" onClick={addStyle} disabled={saving}>
-                    <Layers3 className="h-4 w-4" />
-                    디자인 저장
-                  </Button>
-                </div>
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  {data.styles.map((style) => (
-                    <div key={style.id} className="rounded-lg border p-3">
-                      {style.imageUrl ? <img src={style.imageUrl} alt={style.title} className="aspect-video w-full rounded object-cover" /> : <div className="aspect-video rounded bg-slate-100" />}
-                      <div className="mt-3 font-semibold">{style.title}</div>
-                      <div className="text-sm text-slate-500">{style.tone}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </section>
 
           <aside className="space-y-4">
@@ -1234,7 +1185,7 @@ export default function Home() {
                       <p className="mt-3 text-sm leading-6 text-slate-600">{selectedSlide.memo}</p>
                       <div className="mt-3 flex flex-wrap gap-1.5">
                         {unique([...selectedSlide.roleTags, ...selectedSlide.structureTags, ...selectedSlide.layoutTags, ...selectedSlide.styleTags, ...selectedSlide.elementTags]).map((tag) => (
-                          <TagPill key={tag}>{tag}</TagPill>
+                          <TagPill key={tag} active>{tag}</TagPill>
                         ))}
                       </div>
                     </>
@@ -1249,13 +1200,50 @@ export default function Home() {
               <div className="mb-3 flex items-center justify-between">
                 <div className="flex items-center gap-2 font-semibold">
                   <Wand2 className="h-4 w-4" />
-                  GPT 프롬프트
+                  슬라이드 이미지 생성 프롬프트
                 </div>
-                <Button variant="outline" className="px-2 py-1 text-xs" onClick={copyPrompt}>
-                  {copied ? <Clipboard className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                  {copied ? "복사됨" : "복사"}
-                </Button>
+                <div className="flex gap-1">
+                  <Button variant="outline" className="px-2 py-1 text-xs" onClick={() => setShowDesign((v) => !v)}>
+                    <Layers3 className="h-4 w-4" />
+                    디자인
+                  </Button>
+                  <Button variant="outline" className="px-2 py-1 text-xs" onClick={copyPrompt}>
+                    {copied ? <Clipboard className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                    {copied ? "복사됨" : "복사"}
+                  </Button>
+                </div>
               </div>
+              {showDesign && (
+                <div className="mb-3 space-y-3 rounded-lg border bg-slate-50 p-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <div className="mb-1 text-xs font-semibold text-slate-500">메인 컬러</div>
+                      <div className="flex gap-1.5">
+                        <input type="color" value={designAttrs.mainColor} onChange={(e) => updateDesignAttrs({ ...designAttrs, mainColor: e.target.value })} className="h-9 w-10 cursor-pointer rounded border p-0.5" />
+                        <input type="text" value={designAttrs.mainColor} onChange={(e) => updateDesignAttrs({ ...designAttrs, mainColor: e.target.value })} className="min-w-0 flex-1 rounded-lg border px-2 py-1 text-xs" />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="mb-1 text-xs font-semibold text-slate-500">서브 컬러</div>
+                      <div className="flex gap-1.5">
+                        <input type="color" value={designAttrs.subColor} onChange={(e) => updateDesignAttrs({ ...designAttrs, subColor: e.target.value })} className="h-9 w-10 cursor-pointer rounded border p-0.5" />
+                        <input type="text" value={designAttrs.subColor} onChange={(e) => updateDesignAttrs({ ...designAttrs, subColor: e.target.value })} className="min-w-0 flex-1 rounded-lg border px-2 py-1 text-xs" />
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="mb-1 text-xs font-semibold text-slate-500">타이틀 정렬</div>
+                    <div className="flex gap-1">
+                      {(["left", "center", "right"] as TitleAlign[]).map((align) => (
+                        <button key={align} onClick={() => updateDesignAttrs({ ...designAttrs, titleAlign: align })}
+                          className={`flex-1 rounded-lg border py-1.5 text-xs transition ${designAttrs.titleAlign === align ? "bg-slate-950 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+                          {{ left: "왼쪽", center: "가운데", right: "오른쪽" }[align]}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
               <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950 p-3 text-xs leading-6 text-slate-100">{prompt}</pre>
             </div>
           </aside>
