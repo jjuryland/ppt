@@ -27,6 +27,8 @@ import { AppData, PaginationPage, SlideDraft, SlideReference, StyleDraft } from 
 
 type Tab = "recommend" | "library" | "style";
 type ImportMode = "replace" | "append";
+type SlideTagText = Pick<SlideDraft, "roleTags" | "structureTags" | "layoutTags" | "styleTags" | "elementTags">;
+type StyleTagText = Pick<StyleDraft, "colors" | "styleTags">;
 
 const emptySlideDraft: SlideDraft = {
   title: "",
@@ -46,6 +48,19 @@ const emptyStyleDraft: StyleDraft = {
   colors: [],
   layoutNotes: "",
   styleTags: []
+};
+
+const emptySlideTagText: Record<keyof SlideTagText, string> = {
+  roleTags: "",
+  structureTags: "",
+  layoutTags: "",
+  styleTags: "",
+  elementTags: ""
+};
+
+const emptyStyleTagText: Record<keyof StyleTagText, string> = {
+  colors: "",
+  styleTags: ""
 };
 
 const TAG_ALIASES: Record<string, string> = {
@@ -95,6 +110,10 @@ function splitTags(value: string) {
 }
 
 function joinTags(tags: string[]) {
+  return tags.join(", ");
+}
+
+function tagsToInput(tags: string[]) {
   return tags.join(", ");
 }
 
@@ -220,30 +239,71 @@ function scoreSlide(slide: SlideReference, page: PaginationPage | null, query: s
   return tagScore + textScore + selectedBoost;
 }
 
+function layoutInstruction(slide: SlideReference | undefined, page: PaginationPage | null) {
+  const tags = slide ? [...slide.structureTags, ...slide.layoutTags, ...slide.elementTags] : page?.structureTags || [];
+  const has = (items: string[]) => items.some((item) => tags.includes(item));
+
+  if (has(["비교", "좌우분할"])) {
+    return "본문을 좌우 2분할로 구성한다. 왼쪽은 현재 상태 또는 문제, 오른쪽은 개선 후 모습 또는 기대효과를 배치한다. 각 영역에는 짧은 제목, 2~3개 핵심 bullet, 작은 강조 박스를 넣는다.";
+  }
+  if (has(["단계", "타임라인", "로드맵"])) {
+    return "본문을 3~5단계 흐름으로 구성한다. 각 단계는 번호, 짧은 단계명, 1줄 설명을 포함하고 좌에서 우로 자연스럽게 이어지게 한다.";
+  }
+  if (has(["표", "테이블"])) {
+    return "본문 중심에 비교표 또는 매트릭스를 배치한다. 행/열 제목을 명확히 두고, 중요한 셀은 옅은 강조 색으로 구분한다.";
+  }
+  if (has(["차트", "그래프"])) {
+    return "본문에 간단한 차트 영역과 해석 메시지 영역을 함께 둔다. 차트는 장식보다 비교 관계가 보이게 단순화하고, 오른쪽 또는 하단에 핵심 인사이트 박스를 둔다.";
+  }
+  if (has(["그리드", "썸네일"])) {
+    return "본문을 3~6개 카드 그리드로 구성한다. 각 카드는 작은 이미지/아이콘 자리, 짧은 제목, 1줄 설명을 포함한다.";
+  }
+  return "본문을 3개 핵심 카드형 레이아웃으로 구성한다. 각 카드는 아이콘, 짧은 소제목, 2줄 설명으로 구성하고, 하단에는 전체를 요약하는 핵심 메시지 바를 둔다.";
+}
+
+function elementInstruction(slide: SlideReference | undefined) {
+  if (!slide) return "아이콘, 카드, 강조 박스는 최소한으로 사용한다.";
+  const elements = slide.elementTags;
+  const parts = [];
+  if (elements.includes("아이콘")) parts.push("각 핵심 항목에는 단순한 라인 아이콘을 붙인다");
+  if (elements.includes("표")) parts.push("정량/비교 정보는 작은 표로 정리한다");
+  if (elements.includes("차트")) parts.push("수치는 임의 생성하지 말고 placeholder 차트로 표현한다");
+  if (elements.includes("강조박스") || elements.includes("도형")) parts.push("중요 메시지는 옅은 배경의 강조 박스로 분리한다");
+  return parts.length ? `${parts.join(". ")}.` : "아이콘, 카드, 강조 박스는 최소한으로 사용한다.";
+}
+
 function buildPrompt(page: PaginationPage | null, slides: SlideReference[], styleTitle: string) {
-  const referenceText = slides.length
-    ? slides
-        .map(
-          (slide, index) =>
-            `${index + 1}. ${slide.title}\n정보구조: ${joinTags(slide.structureTags)}\n레이아웃: ${joinTags(slide.layoutTags)}\n구성요소: ${joinTags(slide.elementTags)}\n메모: ${slide.memo}`
-        )
-        .join("\n\n")
-    : "선택된 장표 레퍼런스 없음";
+  const primary = slides[0];
+  const secondary = slides.slice(1, 3);
+  const secondaryText = secondary.length
+    ? secondary.map((slide) => `- ${slide.title}: ${joinTags([...slide.structureTags, ...slide.layoutTags]) || slide.memo}`).join("\n")
+    : "- 보조 참고 없음";
 
   return `[ROLE]
-당신은 PPT 제작자를 돕는 장표 이미지 프롬프트 작성자입니다.
+당신은 제안서/보고서용 PPT 장표를 설계하는 전문 디자이너입니다.
 
-[PAGE]
+[PAGE GOAL]
 ${page ? `${page.pageNumber}p. ${page.title}\n${page.description}` : "선택된 페이지 없음"}
 
-[REFERENCE]
-${referenceText}
+[PRIMARY LAYOUT DIRECTION]
+${primary ? `"${primary.title}" 레퍼런스를 주 구조로 참고한다.` : "선택된 레퍼런스가 없으므로 페이지 목적에 맞는 기본 보고서형 구조로 설계한다."}
+${layoutInstruction(primary, page)}
+${elementInstruction(primary)}
 
-[STYLE]
-${styleTitle || (slides[0] ? joinTags(slides[0].styleTags) : "보고서형, 정돈된 레이아웃, 과하지 않은 시각 요소")}
+[SECONDARY REFERENCES]
+${secondaryText}
+보조 레퍼런스는 세부 표현 방식만 참고하고, 주 구조를 흐트러뜨리지 않는다.
+
+[VISUAL STYLE]
+${styleTitle || (primary ? joinTags(primary.styleTags) : "보고서형, 정돈된 레이아웃, 과하지 않은 시각 요소")}
+흰색 또는 아주 옅은 배경, 선명한 제목, 균형 잡힌 여백, 과하지 않은 색상 사용.
 
 [OUTPUT]
-16:9 PPT 장표 이미지처럼 생성. 제목, 본문 카드, 핵심 메시지가 명확하게 보이도록 구성. 실제 회사명/금액/개인정보는 임의로 만들지 말고 placeholder로 처리.`;
+16:9 PPT 한 장 이미지로 생성한다.
+상단에는 명확한 제목 영역을 둔다.
+본문은 위 레이아웃 지시를 따른다.
+텍스트는 실제 발표자료처럼 짧고 읽기 쉽게 배치한다.
+실제 회사명, 실명, 금액, 통계 수치, 개인정보는 임의로 만들지 말고 placeholder로 처리한다.`;
 }
 
 function Button({
@@ -275,17 +335,61 @@ function TagPill({ children, active = false }: { children: React.ReactNode; acti
   );
 }
 
+function hasAnyTag(slide: SlideReference, tags: string[]) {
+  const all = [...slide.roleTags, ...slide.structureTags, ...slide.layoutTags, ...slide.styleTags, ...slide.elementTags];
+  return tags.some((tag) => all.includes(tag));
+}
+
 function SlideMock({ slide }: { slide: SlideReference }) {
-  const isCompare = slide.layoutTags.includes("좌우분할") || slide.structureTags.includes("비교");
-  const isProcess = slide.layoutTags.includes("타임라인") || slide.structureTags.includes("단계");
-  const isGrid = slide.layoutTags.includes("그리드") || slide.layoutTags.includes("썸네일");
+  const isCompare = hasAnyTag(slide, ["좌우분할", "비교"]);
+  const isProcess = hasAnyTag(slide, ["타임라인", "단계", "로드맵"]);
+  const isGrid = hasAnyTag(slide, ["그리드", "썸네일", "사례"]);
+  const isTable = hasAnyTag(slide, ["표", "테이블"]);
+  const isChart = hasAnyTag(slide, ["차트", "그래프", "대시보드"]);
+  const isSummary = hasAnyTag(slide, ["요약", "개요"]);
+  const cardCount = hasAnyTag(slide, ["4가지", "4개"]) ? 4 : hasAnyTag(slide, ["5가지", "5개"]) ? 5 : 3;
 
   return (
     <div className="relative aspect-video overflow-hidden rounded-md border border-slate-200 bg-white p-3">
       {slide.imageUrl && <img src={slide.imageUrl} alt="" className="absolute inset-0 h-full w-full object-cover opacity-10" />}
       <div className="relative h-2 w-1/2 rounded bg-slate-300" />
       <div className="relative mt-2 h-1.5 w-1/3 rounded bg-slate-200" />
-      {isCompare ? (
+      {isTable ? (
+        <div className="relative mt-4 overflow-hidden rounded border bg-slate-50">
+          {[1, 2, 3, 4].map((row) => (
+            <div key={row} className="grid grid-cols-4 border-b last:border-b-0">
+              {[1, 2, 3, 4].map((col) => (
+                <div key={col} className={`h-6 border-r last:border-r-0 ${row === 1 ? "bg-slate-200" : "bg-white"}`} />
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : isChart ? (
+        <div className="relative mt-4 grid h-[58%] grid-cols-[1.1fr_0.9fr] gap-3">
+          <div className="flex items-end gap-2 rounded border bg-slate-50 p-3">
+            {[45, 70, 38, 86].map((height) => (
+              <div key={height} className="flex-1 rounded-t bg-slate-300" style={{ height: `${height}%` }} />
+            ))}
+          </div>
+          <div className="rounded border bg-slate-50 p-3">
+            <div className="mb-2 h-8 w-8 rounded-full bg-slate-300" />
+            <div className="mb-1 h-2 w-full rounded bg-slate-300" />
+            <div className="h-1.5 w-2/3 rounded bg-slate-200" />
+          </div>
+        </div>
+      ) : isSummary ? (
+        <div className="relative mt-5 grid h-[55%] grid-cols-[1.2fr_0.8fr] gap-3">
+          <div className="rounded border bg-slate-50 p-3">
+            <div className="mb-2 h-3 w-4/5 rounded bg-slate-300" />
+            <div className="mb-1 h-2 w-full rounded bg-slate-200" />
+            <div className="mb-1 h-2 w-5/6 rounded bg-slate-200" />
+            <div className="h-2 w-2/3 rounded bg-slate-200" />
+          </div>
+          <div className="rounded bg-slate-100 p-3">
+            <div className="mx-auto h-16 w-16 rounded-full bg-slate-300" />
+          </div>
+        </div>
+      ) : isCompare ? (
         <div className="relative mt-5 grid h-[55%] grid-cols-2 gap-3">
           {["Before", "After"].map((label) => (
             <div key={label} className="rounded border bg-slate-50 p-2">
@@ -307,8 +411,8 @@ function SlideMock({ slide }: { slide: SlideReference }) {
           ))}
         </div>
       ) : isGrid ? (
-        <div className="relative mt-4 grid h-[58%] grid-cols-3 gap-2">
-          {[1, 2, 3].map((n) => (
+        <div className={`relative mt-4 grid h-[58%] gap-2 ${cardCount > 3 ? "grid-cols-4" : "grid-cols-3"}`}>
+          {Array.from({ length: cardCount }).map((_, n) => (
             <div key={n} className="rounded bg-slate-100 p-2">
               <div className="mb-2 h-8 rounded bg-slate-300" />
               <div className="h-1.5 w-4/5 rounded bg-slate-300" />
@@ -316,8 +420,8 @@ function SlideMock({ slide }: { slide: SlideReference }) {
           ))}
         </div>
       ) : (
-        <div className="relative mt-4 grid h-[58%] grid-cols-3 gap-2">
-          {[1, 2, 3].map((n) => (
+        <div className={`relative mt-4 grid h-[58%] gap-2 ${cardCount > 3 ? "grid-cols-4" : "grid-cols-3"}`}>
+          {Array.from({ length: cardCount }).map((_, n) => (
             <div key={n} className="rounded border bg-slate-50 p-2">
               <div className="mb-2 h-5 w-5 rounded-full bg-slate-300" />
               <div className="mb-1 h-2 w-3/4 rounded bg-slate-300" />
@@ -341,18 +445,21 @@ export default function Home() {
   const [selectedSlideId, setSelectedSlideId] = useState(seedData.slides[0]?.id || "");
   const [tab, setTab] = useState<Tab>("recommend");
   const [query, setQuery] = useState("");
+  const [selectedFilterTags, setSelectedFilterTags] = useState<string[]>([]);
   const [paginationText, setPaginationText] = useState("");
   const [parsedPagination, setParsedPagination] = useState<Pick<AppData, "sections" | "pages"> | null>(null);
   const [importMode, setImportMode] = useState<ImportMode>("replace");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [slideDraft, setSlideDraft] = useState<SlideDraft>(emptySlideDraft);
+  const [slideTagText, setSlideTagText] = useState(emptySlideTagText);
   const [styleDraft, setStyleDraft] = useState<StyleDraft>(emptyStyleDraft);
+  const [styleTagText, setStyleTagText] = useState(emptyStyleTagText);
   const [slideFile, setSlideFile] = useState<File>();
   const [styleFile, setStyleFile] = useState<File>();
   const [copied, setCopied] = useState(false);
-  const [apiKey, setApiKey] = useState("");
-  const [keyStatus, setKeyStatus] = useState("서버 키 우선 사용");
+  const [aiStatus, setAiStatus] = useState("AI 분석 준비 상태 확인 중...");
+  const [showAllSlides, setShowAllSlides] = useState(false);
   const [analyzingSlide, setAnalyzingSlide] = useState(false);
   const pageDescriptionRef = useRef<HTMLTextAreaElement>(null);
 
@@ -367,6 +474,20 @@ export default function Home() {
       .catch((error) => setMessage(`데이터 로드 실패: ${error.message}`));
   }, []);
 
+  useEffect(() => {
+    fetch("/api/verify-key", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({})
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error("AI 분석 비활성");
+        return response.json();
+      })
+      .then(() => setAiStatus("서버 OpenAI 키 연결됨"))
+      .catch(() => setAiStatus("서버 OPENAI_API_KEY가 없어 AI 분석을 사용할 수 없습니다."));
+  }, []);
+
   const selectedPage = useMemo(() => data.pages.find((page) => page.id === selectedPageId) || data.pages[0] || null, [data.pages, selectedPageId]);
   const selectedSlide = useMemo(() => data.slides.find((slide) => slide.id === selectedSlideId) || data.slides[0] || null, [data.slides, selectedSlideId]);
   const appliedSlides = useMemo(
@@ -374,14 +495,15 @@ export default function Home() {
     [data.slides, selectedPage]
   );
   const allTags = useMemo(() => normalizeTags(data.tags.map((tag) => tag.name).concat(data.slides.flatMap((slide) => [...slide.structureTags, ...slide.roleTags, ...slide.layoutTags, ...slide.styleTags, ...slide.elementTags]))), [data]);
-  const recommendedSlides = useMemo(() => {
+  const effectiveQuery = useMemo(() => unique([...query.trim().split(/\s+/).filter(Boolean), ...selectedFilterTags]).join(" "), [query, selectedFilterTags]);
+  const scoredSlides = useMemo(() => {
     return [...data.slides]
-      .map((slide) => ({ slide, score: scoreSlide(slide, selectedPage, query) }))
-      .sort((a, b) => b.score - a.score)
-      .map((item) => item.slide);
-  }, [data.slides, selectedPage, query]);
+      .map((slide) => ({ slide, score: scoreSlide(slide, selectedPage, effectiveQuery) }))
+      .sort((a, b) => b.score - a.score);
+  }, [data.slides, selectedPage, effectiveQuery]);
+  const recommendedSlides = useMemo(() => scoredSlides.map((item) => item.slide), [scoredSlides]);
   const filteredSlides = useMemo(() => {
-    const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const terms = effectiveQuery.toLowerCase().split(/\s+/).filter(Boolean);
     if (!terms.length) return recommendedSlides;
     return recommendedSlides.filter((slide) => {
       const body = [slide.title, slide.sourceName, slide.memo, ...slide.roleTags, ...slide.structureTags, ...slide.layoutTags, ...slide.styleTags, ...slide.elementTags]
@@ -389,7 +511,13 @@ export default function Home() {
         .toLowerCase();
       return terms.every((term) => body.includes(term));
     });
-  }, [query, recommendedSlides]);
+  }, [effectiveQuery, recommendedSlides]);
+  const visibleSlides = useMemo(() => {
+    if (effectiveQuery || showAllSlides) return filteredSlides;
+    const relevantIds = new Set(scoredSlides.filter((item) => item.score > 0).map((item) => item.slide.id));
+    const relevant = filteredSlides.filter((slide) => relevantIds.has(slide.id));
+    return (relevant.length ? relevant : filteredSlides).slice(0, 12);
+  }, [effectiveQuery, filteredSlides, scoredSlides, showAllSlides]);
   const prompt = useMemo(() => {
     const slides = appliedSlides.length ? appliedSlides : selectedSlide ? [selectedSlide] : [];
     return buildPrompt(selectedPage, slides, data.styles[0]?.title || "");
@@ -482,12 +610,16 @@ export default function Home() {
     setMessage("붙여넣은 이미지를 장표 등록에 넣었습니다.");
   }
 
+  function toggleFilterTag(tag: string) {
+    setSelectedFilterTags((prev) => (prev.includes(tag) ? prev.filter((item) => item !== tag) : [...prev, tag]));
+  }
+
   async function applySlideToPage(slideId: string) {
     if (!selectedPage) return setMessage("먼저 페이지를 선택하세요.");
     const selectedSlideIds = unique([slideId, ...selectedPage.selectedSlideIds]);
     await updatePage({ ...selectedPage, selectedSlideIds });
     setSelectedSlideId(slideId);
-    setMessage(`${selectedPage.pageNumber}p에 장표 레퍼런스를 적용했습니다.`);
+    setMessage(`${selectedPage.pageNumber}p 프롬프트 후보에 장표를 추가했습니다.`);
   }
 
   async function removeSlideFromPage(slideId: string) {
@@ -495,20 +627,42 @@ export default function Home() {
     await updatePage({ ...selectedPage, selectedSlideIds: selectedPage.selectedSlideIds.filter((id) => id !== slideId) });
   }
 
+  async function deleteSelectedSlide() {
+    if (!selectedSlide) return;
+    const ok = window.confirm(`"${selectedSlide.title}" 장표 레퍼런스를 삭제할까요? 모든 페이지의 적용 목록에서도 제거됩니다.`);
+    if (!ok) return;
+
+    setSaving(true);
+    try {
+      const next = await repository.deleteSlide(data, selectedSlide.id);
+      setData(next);
+      setSelectedSlideId(next.slides[0]?.id || "");
+      setMessage("장표 레퍼런스를 삭제했습니다.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "장표 삭제 실패");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function addSlide() {
     if (!slideDraft.title.trim()) return setMessage("장표 제목은 필수입니다.");
     setSaving(true);
     try {
+      const tags = {
+        roleTags: splitTags(slideTagText.roleTags),
+        structureTags: splitTags(slideTagText.structureTags),
+        layoutTags: splitTags(slideTagText.layoutTags),
+        styleTags: splitTags(slideTagText.styleTags),
+        elementTags: splitTags(slideTagText.elementTags)
+      };
       const next = await repository.addSlide(data, {
         ...slideDraft,
-        roleTags: normalizeTags(slideDraft.roleTags),
-        structureTags: normalizeTags(slideDraft.structureTags),
-        layoutTags: normalizeTags(slideDraft.layoutTags),
-        styleTags: normalizeTags(slideDraft.styleTags),
-        elementTags: normalizeTags(slideDraft.elementTags)
+        ...tags
       }, slideFile);
       setData(next);
       setSlideDraft(emptySlideDraft);
+      setSlideTagText(emptySlideTagText);
       setSlideFile(undefined);
       setTab("recommend");
       setSelectedSlideId(next.slides[0].id);
@@ -524,9 +678,14 @@ export default function Home() {
     if (!styleDraft.title.trim()) return setMessage("디자인 레퍼런스 제목은 필수입니다.");
     setSaving(true);
     try {
-      const next = await repository.addStyle(data, styleDraft, styleFile);
+      const next = await repository.addStyle(data, {
+        ...styleDraft,
+        colors: splitTags(styleTagText.colors),
+        styleTags: splitTags(styleTagText.styleTags)
+      }, styleFile);
       setData(next);
       setStyleDraft(emptyStyleDraft);
+      setStyleTagText(emptyStyleTagText);
       setStyleFile(undefined);
       setMessage("디자인 레퍼런스를 등록했습니다.");
     } catch (error) {
@@ -542,33 +701,13 @@ export default function Home() {
     setTimeout(() => setCopied(false), 1200);
   }
 
-  async function verifyApiKey() {
-    const trimmed = apiKey.trim();
-
-    setKeyStatus("확인 중...");
-    try {
-      const response = await fetch("/api/verify-key", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: trimmed })
-      });
-      if (!response.ok) throw new Error("API 키 확인 실패");
-      const payload = await response.json();
-      setKeyStatus(payload.mode === "server" ? "서버 OpenAI 키 사용 가능" : "임시 입력 키 확인 완료");
-    } catch {
-      setKeyStatus("API 키를 확인하지 못했습니다.");
-    }
-  }
-
   async function analyzeSlideImage() {
-    const trimmed = apiKey.trim();
     if (!slideFile) return setMessage("분석할 장표 이미지를 먼저 업로드하세요.");
 
     setAnalyzingSlide(true);
     setMessage("AI가 장표를 분석하는 중입니다...");
     try {
       const formData = new FormData();
-      if (trimmed) formData.append("apiKey", trimmed);
       formData.append("file", slideFile);
 
       const response = await fetch("/api/analyze-slide", {
@@ -579,16 +718,26 @@ export default function Home() {
       if (!response.ok) throw new Error(payload?.error || "AI 분석 실패");
 
       const analysis = payload.analysis || {};
+      const analyzedTags = {
+        roleTags: analysis.roleTags?.length ? normalizeTags(analysis.roleTags) : slideDraft.roleTags,
+        structureTags: analysis.structureTags?.length ? normalizeTags(analysis.structureTags) : slideDraft.structureTags,
+        layoutTags: analysis.layoutTags?.length ? normalizeTags(analysis.layoutTags) : slideDraft.layoutTags,
+        styleTags: analysis.styleTags?.length ? normalizeTags(analysis.styleTags) : slideDraft.styleTags,
+        elementTags: analysis.elementTags?.length ? normalizeTags(analysis.elementTags) : slideDraft.elementTags
+      };
       setSlideDraft((prev) => ({
         ...prev,
         title: analysis.title || prev.title,
-        roleTags: analysis.roleTags?.length ? normalizeTags(analysis.roleTags) : prev.roleTags,
-        structureTags: analysis.structureTags?.length ? normalizeTags(analysis.structureTags) : prev.structureTags,
-        layoutTags: analysis.layoutTags?.length ? normalizeTags(analysis.layoutTags) : prev.layoutTags,
-        styleTags: analysis.styleTags?.length ? normalizeTags(analysis.styleTags) : prev.styleTags,
-        elementTags: analysis.elementTags?.length ? normalizeTags(analysis.elementTags) : prev.elementTags,
+        ...analyzedTags,
         memo: analysis.memo || prev.memo
       }));
+      setSlideTagText({
+        roleTags: tagsToInput(analyzedTags.roleTags),
+        structureTags: tagsToInput(analyzedTags.structureTags),
+        layoutTags: tagsToInput(analyzedTags.layoutTags),
+        styleTags: tagsToInput(analyzedTags.styleTags),
+        elementTags: tagsToInput(analyzedTags.elementTags)
+      });
       setMessage("AI 분석 결과를 등록 폼에 채웠습니다. 저장 전 내용만 확인하세요.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "AI 분석 실패");
@@ -618,20 +767,7 @@ export default function Home() {
               <Sparkles className="h-4 w-4" />
               AI 분석
             </div>
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(event) => {
-                setApiKey(event.target.value);
-                setKeyStatus("서버 키 우선 사용");
-              }}
-              placeholder="팀 서버 키가 없을 때만 임시 API 키 입력"
-              className="min-w-[260px] flex-1 rounded-lg border px-3 py-2 text-sm"
-            />
-            <Button variant="outline" onClick={verifyApiKey}>
-              확인
-            </Button>
-            {keyStatus && <span className="text-sm text-slate-500">{keyStatus}</span>}
+            <span className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600">{aiStatus}</span>
           </div>
         </div>
 
@@ -801,21 +937,23 @@ export default function Home() {
                     className="rounded-lg border px-3 py-2 text-sm md:col-span-2"
                   />
                   <div className="rounded-lg border bg-slate-50 p-3 md:col-span-2">
-                    <div className="mb-2 text-xs font-semibold text-slate-600">이 페이지에 적용한 장표</div>
+                    <div className="mb-1 text-xs font-semibold text-slate-600">프롬프트에 참고할 장표 후보</div>
+                    <p className="mb-2 text-xs text-slate-500">첫 번째 후보는 주 레이아웃, 나머지는 보조 참고로 GPT 프롬프트에 반영됩니다.</p>
                     {appliedSlides.length ? (
                       <div className="flex flex-wrap gap-2">
                         {appliedSlides.map((slide) => (
-                          <button
-                            key={slide.id}
-                            onClick={() => setSelectedSlideId(slide.id)}
-                            className="rounded-md border bg-white px-2 py-1 text-xs text-slate-700 hover:border-slate-500"
-                          >
-                            {slide.title}
-                          </button>
+                          <div key={slide.id} className="inline-flex items-center gap-1 rounded-md border bg-white px-2 py-1 text-xs text-slate-700">
+                            <button onClick={() => setSelectedSlideId(slide.id)} className="hover:text-slate-950">
+                              {slide.title}
+                            </button>
+                            <button onClick={() => removeSlideFromPage(slide.id)} className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-red-600">
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
                         ))}
                       </div>
                     ) : (
-                      <div className="text-xs text-slate-500">아래 추천 목록에서 이 페이지에 적용할 장표를 선택하세요.</div>
+                      <div className="text-xs text-slate-500">아래 추천 목록에서 프롬프트에 넣을 참고 장표를 추가하세요.</div>
                     )}
                   </div>
                 </div>
@@ -850,17 +988,27 @@ export default function Home() {
                       className="w-full rounded-lg border py-2 pl-9 pr-3 text-sm outline-none focus:border-slate-500"
                     />
                   </div>
-                  <span className="text-sm text-slate-500">{filteredSlides.length}개 결과</span>
+                  <span className="text-sm text-slate-500">{visibleSlides.length}/{filteredSlides.length}개 표시</span>
                 </div>
                 <div className="mb-3 flex flex-wrap gap-1.5">
                   {allTags.slice(0, 18).map((tag) => (
-                    <button key={tag} onClick={() => setQuery((prev) => unique([...splitTags(prev), tag]).join(" "))}>
-                      <TagPill active={query.includes(tag)}>{tag}</TagPill>
+                    <button key={tag} onClick={() => toggleFilterTag(tag)}>
+                      <TagPill active={selectedFilterTags.includes(tag)}>{tag}</TagPill>
                     </button>
                   ))}
+                  {selectedFilterTags.length > 0 && (
+                    <button onClick={() => setSelectedFilterTags([])}>
+                      <TagPill>필터 해제</TagPill>
+                    </button>
+                  )}
+                  {!effectiveQuery && filteredSlides.length > 12 && (
+                    <button onClick={() => setShowAllSlides((prev) => !prev)}>
+                      <TagPill active={showAllSlides}>{showAllSlides ? "관련 후보만" : "전체 보기"}</TagPill>
+                    </button>
+                  )}
                 </div>
                 <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-                  {filteredSlides.map((slide) => (
+                  {visibleSlides.map((slide) => (
                     <div
                       key={slide.id}
                       onClick={() => setSelectedSlideId(slide.id)}
@@ -888,7 +1036,7 @@ export default function Home() {
                         }}
                       >
                         {selectedPage?.selectedSlideIds.includes(slide.id) ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                        {selectedPage?.selectedSlideIds.includes(slide.id) ? "이 페이지에 적용됨" : "이 페이지에 적용"}
+                        {selectedPage?.selectedSlideIds.includes(slide.id) ? "프롬프트 후보에 추가됨" : "프롬프트 후보에 추가"}
                       </Button>
                     </div>
                   ))}
@@ -922,14 +1070,14 @@ export default function Home() {
                     </Button>
                     <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="장표 제목" value={slideDraft.title} onChange={(event) => setSlideDraft({ ...slideDraft, title: event.target.value })} />
                     <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="출처 문서명" value={slideDraft.sourceName} onChange={(event) => setSlideDraft({ ...slideDraft, sourceName: event.target.value })} />
-                    <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="역할 태그: 전략, 문제정의" value={joinTags(slideDraft.roleTags)} onChange={(event) => setSlideDraft({ ...slideDraft, roleTags: splitTags(event.target.value) })} />
-                    <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="정보구조 태그: 병렬, 비교" value={joinTags(slideDraft.structureTags)} onChange={(event) => setSlideDraft({ ...slideDraft, structureTags: splitTags(event.target.value) })} />
-                    <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="레이아웃 태그: 카드형, 타임라인" value={joinTags(slideDraft.layoutTags)} onChange={(event) => setSlideDraft({ ...slideDraft, layoutTags: splitTags(event.target.value) })} />
+                    <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="역할 태그: 전략, 문제정의" value={slideTagText.roleTags} onChange={(event) => setSlideTagText({ ...slideTagText, roleTags: event.target.value })} />
+                    <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="정보구조 태그: 병렬, 비교" value={slideTagText.structureTags} onChange={(event) => setSlideTagText({ ...slideTagText, structureTags: event.target.value })} />
+                    <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="레이아웃 태그: 카드형, 타임라인" value={slideTagText.layoutTags} onChange={(event) => setSlideTagText({ ...slideTagText, layoutTags: event.target.value })} />
                   </div>
                   <textarea className="min-h-24 rounded-lg border px-3 py-2 text-sm md:col-span-2" placeholder="메모: 언제 쓰면 좋은 장표인지" value={slideDraft.memo} onChange={(event) => setSlideDraft({ ...slideDraft, memo: event.target.value })} />
                   <div className="grid gap-2 md:col-span-2 md:grid-cols-2">
-                    <input className="rounded-lg border px-3 py-2 text-sm" placeholder="스타일 태그: 보고서형, 공공기관" value={joinTags(slideDraft.styleTags)} onChange={(event) => setSlideDraft({ ...slideDraft, styleTags: splitTags(event.target.value) })} />
-                    <input className="rounded-lg border px-3 py-2 text-sm" placeholder="구성요소 태그: 아이콘, 표" value={joinTags(slideDraft.elementTags)} onChange={(event) => setSlideDraft({ ...slideDraft, elementTags: splitTags(event.target.value) })} />
+                    <input className="rounded-lg border px-3 py-2 text-sm" placeholder="스타일 태그: 보고서형, 공공기관" value={slideTagText.styleTags} onChange={(event) => setSlideTagText({ ...slideTagText, styleTags: event.target.value })} />
+                    <input className="rounded-lg border px-3 py-2 text-sm" placeholder="구성요소 태그: 아이콘, 표" value={slideTagText.elementTags} onChange={(event) => setSlideTagText({ ...slideTagText, elementTags: event.target.value })} />
                   </div>
                   <Button className="md:col-span-2" onClick={addSlide} disabled={saving}>
                     <ImagePlus className="h-4 w-4" />
@@ -953,8 +1101,8 @@ export default function Home() {
                   <div className="space-y-2">
                     <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="스타일 제목" value={styleDraft.title} onChange={(event) => setStyleDraft({ ...styleDraft, title: event.target.value })} />
                     <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="톤: 신뢰감, 미래지향" value={styleDraft.tone} onChange={(event) => setStyleDraft({ ...styleDraft, tone: event.target.value })} />
-                    <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="색상: #1f2937, #2563eb" value={joinTags(styleDraft.colors)} onChange={(event) => setStyleDraft({ ...styleDraft, colors: splitTags(event.target.value) })} />
-                    <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="스타일 태그" value={joinTags(styleDraft.styleTags)} onChange={(event) => setStyleDraft({ ...styleDraft, styleTags: splitTags(event.target.value) })} />
+                    <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="색상: #1f2937, #2563eb" value={styleTagText.colors} onChange={(event) => setStyleTagText({ ...styleTagText, colors: event.target.value })} />
+                    <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="스타일 태그" value={styleTagText.styleTags} onChange={(event) => setStyleTagText({ ...styleTagText, styleTags: event.target.value })} />
                   </div>
                   <textarea className="min-h-24 rounded-lg border px-3 py-2 text-sm md:col-span-2" placeholder="레이아웃/무드 메모" value={styleDraft.layoutNotes} onChange={(event) => setStyleDraft({ ...styleDraft, layoutNotes: event.target.value })} />
                   <Button className="md:col-span-2" onClick={addStyle} disabled={saving}>
@@ -977,7 +1125,17 @@ export default function Home() {
 
           <aside className="space-y-4">
             <div className="rounded-lg border bg-white p-4">
-              <div className="mb-3 font-semibold">선택 장표</div>
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <div>
+                  <div className="font-semibold">선택 장표</div>
+                  <div className="text-xs text-slate-500">레퍼런스 원본과 구조 요약</div>
+                </div>
+                {selectedSlide && (
+                  <Button variant="ghost" className="px-2 text-red-600 hover:bg-red-50" onClick={deleteSelectedSlide} disabled={saving}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
               {selectedSlide ? (
                 <>
                   <OriginalSlideImage slide={selectedSlide} />
