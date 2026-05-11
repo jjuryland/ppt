@@ -530,7 +530,7 @@ export default function Home() {
     () => data.slides.filter((slide) => selectedPage?.selectedSlideIds.includes(slide.id)),
     [data.slides, selectedPage]
   );
-  const allTags = useMemo(() => normalizeTags(data.tags.map((tag) => tag.name).concat(data.slides.flatMap((slide) => [...slide.structureTags, ...slide.roleTags, ...slide.layoutTags, ...slide.styleTags, ...slide.elementTags]))), [data]);
+  const allTags = useMemo(() => normalizeTags(data.tags.map((tag) => tag.name).concat(data.slides.flatMap((slide) => [...slide.roleTags, ...slide.structureTags, ...slide.elementTags]))), [data]);
   const effectiveQuery = useMemo(() => unique([...query.trim().split(/\s+/).filter(Boolean), ...selectedFilterTags]).join(" "), [query, selectedFilterTags]);
   const scoredSlides = useMemo(() => {
     return [...data.slides]
@@ -1044,7 +1044,7 @@ export default function Home() {
                     <input
                       value={query}
                       onChange={(event) => setQuery(event.target.value)}
-                      placeholder="필터: 카드형, 비교, 로드맵, 보고서형"
+                      placeholder="필터: 병렬, 비교, 단계, 카드, 표, 전략"
                       className="w-full rounded-lg border py-2 pl-9 pr-3 text-sm outline-none focus:border-slate-500"
                     />
                   </div>
@@ -1085,7 +1085,7 @@ export default function Home() {
                         <FileImage className="h-4 w-4 shrink-0 text-slate-400" />
                       </div>
                       <div className="mt-2 flex flex-wrap gap-1">
-                        {unique([...slide.structureTags, ...slide.layoutTags, ...slide.styleTags]).slice(0, 5).map((tag) => (
+                        {unique([...slide.roleTags, ...slide.structureTags, ...slide.elementTags]).slice(0, 5).map((tag) => (
                           <TagPill key={tag}>{tag}</TagPill>
                         ))}
                       </div>
@@ -1184,7 +1184,7 @@ export default function Home() {
                       <div className="mt-1 text-sm text-slate-500">{selectedSlide.sourceName}{selectedSlide.pageNumber ? ` · p.${selectedSlide.pageNumber}` : ""}</div>
                       <p className="mt-3 text-sm leading-6 text-slate-600">{selectedSlide.memo}</p>
                       <div className="mt-3 flex flex-wrap gap-1.5">
-                        {unique([...selectedSlide.roleTags, ...selectedSlide.structureTags, ...selectedSlide.layoutTags, ...selectedSlide.styleTags, ...selectedSlide.elementTags]).map((tag) => (
+                        {unique([...selectedSlide.roleTags, ...selectedSlide.structureTags, ...selectedSlide.elementTags]).map((tag) => (
                           <TagPill key={tag} active>{tag}</TagPill>
                         ))}
                       </div>
@@ -1198,18 +1198,16 @@ export default function Home() {
 
             <div className="rounded-lg border bg-white p-4">
               <div className="mb-3 flex items-center justify-between">
-                <div className="flex items-center gap-2 font-semibold">
-                  <Wand2 className="h-4 w-4" />
-                  슬라이드 이미지 생성 프롬프트
+                <div className="flex items-center gap-2 font-semibold text-sm">
+                  <Wand2 className="h-4 w-4 shrink-0" />
+                  이미지 생성 프롬프트
                 </div>
-                <div className="flex gap-1">
-                  <Button variant="outline" className="px-2 py-1 text-xs" onClick={() => setShowDesign((v) => !v)}>
+                <div className="flex shrink-0 gap-1">
+                  <Button variant="outline" className="px-2 py-1 text-xs" onClick={() => setShowDesign((v) => !v)} title="디자인 설정">
                     <Layers3 className="h-4 w-4" />
-                    디자인
                   </Button>
-                  <Button variant="outline" className="px-2 py-1 text-xs" onClick={copyPrompt}>
+                  <Button variant="outline" className="px-2 py-1 text-xs" onClick={copyPrompt} title={copied ? "복사됨" : "복사"}>
                     {copied ? <Clipboard className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                    {copied ? "복사됨" : "복사"}
                   </Button>
                 </div>
               </div>
