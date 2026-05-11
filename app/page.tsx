@@ -29,7 +29,7 @@ import { AppData, PaginationPage, SlideDraft, SlideReference, StyleDraft } from 
 
 type Tab = "recommend" | "library" | "style";
 type ImportMode = "replace" | "append";
-type SlideTagText = Pick<SlideDraft, "roleTags" | "structureTags" | "layoutTags" | "styleTags" | "elementTags">;
+type SlideTagText = Pick<SlideDraft, "roleTags" | "structureTags" | "elementTags">;
 type StyleTagText = Pick<StyleDraft, "colors" | "styleTags">;
 
 const emptySlideDraft: SlideDraft = {
@@ -55,8 +55,6 @@ const emptyStyleDraft: StyleDraft = {
 const emptySlideTagText: Record<keyof SlideTagText, string> = {
   roleTags: "",
   structureTags: "",
-  layoutTags: "",
-  styleTags: "",
   elementTags: ""
 };
 
@@ -296,12 +294,16 @@ ${elementInstruction(primary)}${secondarySection}
 ${styleTitle || (primary ? joinTags(primary.styleTags) : "보고서형, 정돈된 레이아웃, 과하지 않은 시각 요소")}
 흰색 또는 아주 옅은 배경, 선명한 제목, 균형 잡힌 여백, 과하지 않은 색상 사용.
 
-[OUTPUT]
-16:9 PPT 한 장 이미지로 생성한다.
-상단에는 명확한 제목 영역을 둔다.
-본문은 위 레이아웃 지시를 따른다.
-텍스트는 실제 발표자료처럼 짧고 읽기 쉽게 배치한다.
-실제 회사명, 실명, 금액, 통계 수치, 개인정보는 임의로 만들지 말고 placeholder로 처리한다.`;
+[STEP 1 — 텍스트 초안]
+위 레이아웃 구조에 맞춰 슬라이드에 들어갈 텍스트를 먼저 작성한다.
+- 슬라이드 제목 1줄
+- 각 영역(카드/단계/열 등)별 소제목과 핵심 문장
+- 실제 회사명, 금액, 통계 수치는 [placeholder]로 처리
+- 텍스트는 짧고 읽기 쉽게, 실제 발표자료 수준으로
+
+[STEP 2 — 이미지 생성]
+위에서 작성한 텍스트를 반영하여 16:9 PPT 장표 이미지를 생성한다.
+상단 제목 영역 + 본문 레이아웃 지시를 따른다.`;
 }
 
 function Button({
@@ -334,14 +336,13 @@ function TagPill({ children, active = false }: { children: React.ReactNode; acti
 }
 
 const PRESET_TAGS: Record<keyof SlideTagText, string[]> = {
-  roleTags: ["전략", "문제정의", "운영전략", "콘텐츠예시", "도입/배경", "성과/결과", "실행계획", "소개"],
-  structureTags: ["병렬", "비교", "단계", "요약", "문제정의", "그리드", "표", "차트"],
-  layoutTags: ["카드형", "타임라인", "좌우분할", "프로세스", "그리드", "인포그래픽"],
-  styleTags: ["보고서형", "공공기관", "트렌디", "미니멀", "모던", "기업형"],
-  elementTags: ["아이콘", "표", "차트", "강조박스", "이미지", "화살표", "숫자강조"]
+  roleTags: ["표지", "배경/도입", "문제정의", "전략", "실행계획", "성과/결과", "콘텐츠예시"],
+  structureTags: ["병렬", "비교", "단계", "그리드", "요약", "단일메시지"],
+  elementTags: ["카드", "표", "차트", "아이콘", "타임라인", "이미지", "강조박스", "화살표"]
 };
 
-function TagChipSelector({ presets, value, onChange, placeholder }: {
+function TagChipSelector({ label, presets, value, onChange, placeholder }: {
+  label: string;
   presets: string[];
   value: string;
   onChange: (v: string) => void;
@@ -354,6 +355,7 @@ function TagChipSelector({ presets, value, onChange, placeholder }: {
   }
   return (
     <div className="space-y-1.5">
+      <div className="text-xs font-semibold text-slate-500">{label}</div>
       <div className="flex flex-wrap gap-1">
         {presets.map((tag) => (
           <button key={tag} type="button" onClick={() => toggle(tag)}
@@ -696,22 +698,19 @@ export default function Home() {
     setEditSlideTagText({
       roleTags: tagsToInput(slide.roleTags),
       structureTags: tagsToInput(slide.structureTags),
-      layoutTags: tagsToInput(slide.layoutTags),
-      styleTags: tagsToInput(slide.styleTags),
       elementTags: tagsToInput(slide.elementTags)
     });
   }
 
   async function saveSlideEdit() {
     if (!editingSlideId || !selectedSlide) return;
-    const tags = {
+    const updated: SlideReference = {
+      ...selectedSlide,
+      ...editSlideDraft,
       roleTags: splitTags(editSlideTagText.roleTags),
       structureTags: splitTags(editSlideTagText.structureTags),
-      layoutTags: splitTags(editSlideTagText.layoutTags),
-      styleTags: splitTags(editSlideTagText.styleTags),
       elementTags: splitTags(editSlideTagText.elementTags)
     };
-    const updated: SlideReference = { ...selectedSlide, ...editSlideDraft, ...tags };
     await commit({ ...data, slides: data.slides.map((s) => (s.id === editingSlideId ? updated : s)) });
     setEditingSlideId(null);
     setMessage("장표 레퍼런스를 수정했습니다.");
@@ -721,16 +720,11 @@ export default function Home() {
     if (!slideDraft.title.trim()) return setMessage("장표 제목은 필수입니다.");
     setSaving(true);
     try {
-      const tags = {
-        roleTags: splitTags(slideTagText.roleTags),
-        structureTags: splitTags(slideTagText.structureTags),
-        layoutTags: splitTags(slideTagText.layoutTags),
-        styleTags: splitTags(slideTagText.styleTags),
-        elementTags: splitTags(slideTagText.elementTags)
-      };
       const next = await repository.addSlide(data, {
         ...slideDraft,
-        ...tags
+        roleTags: splitTags(slideTagText.roleTags),
+        structureTags: splitTags(slideTagText.structureTags),
+        elementTags: splitTags(slideTagText.elementTags)
       }, slideFile);
       setData(next);
       setSlideDraft(emptySlideDraft);
@@ -793,8 +787,6 @@ export default function Home() {
       const analyzedTags = {
         roleTags: analysis.roleTags?.length ? normalizeTags(analysis.roleTags) : slideDraft.roleTags,
         structureTags: analysis.structureTags?.length ? normalizeTags(analysis.structureTags) : slideDraft.structureTags,
-        layoutTags: analysis.layoutTags?.length ? normalizeTags(analysis.layoutTags) : slideDraft.layoutTags,
-        styleTags: analysis.styleTags?.length ? normalizeTags(analysis.styleTags) : slideDraft.styleTags,
         elementTags: analysis.elementTags?.length ? normalizeTags(analysis.elementTags) : slideDraft.elementTags
       };
       setSlideDraft((prev) => ({
@@ -806,8 +798,6 @@ export default function Home() {
       setSlideTagText({
         roleTags: tagsToInput(analyzedTags.roleTags),
         structureTags: tagsToInput(analyzedTags.structureTags),
-        layoutTags: tagsToInput(analyzedTags.layoutTags),
-        styleTags: tagsToInput(analyzedTags.styleTags),
         elementTags: tagsToInput(analyzedTags.elementTags)
       });
       setMessage("AI 분석 결과를 등록 폼에 채웠습니다. 저장 전 내용만 확인하세요.");
@@ -1140,15 +1130,11 @@ export default function Home() {
                     </Button>
                     <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="장표 제목" value={slideDraft.title} onChange={(event) => setSlideDraft({ ...slideDraft, title: event.target.value })} />
                     <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="출처 문서명" value={slideDraft.sourceName} onChange={(event) => setSlideDraft({ ...slideDraft, sourceName: event.target.value })} />
-                    <TagChipSelector presets={PRESET_TAGS.roleTags} value={slideTagText.roleTags} onChange={(v) => setSlideTagText({ ...slideTagText, roleTags: v })} placeholder="역할 태그 직접 입력" />
-                    <TagChipSelector presets={PRESET_TAGS.structureTags} value={slideTagText.structureTags} onChange={(v) => setSlideTagText({ ...slideTagText, structureTags: v })} placeholder="정보구조 태그 직접 입력" />
-                    <TagChipSelector presets={PRESET_TAGS.layoutTags} value={slideTagText.layoutTags} onChange={(v) => setSlideTagText({ ...slideTagText, layoutTags: v })} placeholder="레이아웃 태그 직접 입력" />
+                    <TagChipSelector label="역할 — 이 장표가 쓰이는 페이지 목적" presets={PRESET_TAGS.roleTags} value={slideTagText.roleTags} onChange={(v) => setSlideTagText({ ...slideTagText, roleTags: v })} placeholder="직접 입력" />
+                    <TagChipSelector label="정보구조 — 정보가 배치되는 방식" presets={PRESET_TAGS.structureTags} value={slideTagText.structureTags} onChange={(v) => setSlideTagText({ ...slideTagText, structureTags: v })} placeholder="직접 입력" />
+                    <TagChipSelector label="구성요소 — 장표에 들어가는 시각 요소" presets={PRESET_TAGS.elementTags} value={slideTagText.elementTags} onChange={(v) => setSlideTagText({ ...slideTagText, elementTags: v })} placeholder="직접 입력" />
                   </div>
                   <textarea className="min-h-24 rounded-lg border px-3 py-2 text-sm md:col-span-2" placeholder="메모: 언제 쓰면 좋은 장표인지" value={slideDraft.memo} onChange={(event) => setSlideDraft({ ...slideDraft, memo: event.target.value })} />
-                  <div className="grid gap-2 md:col-span-2 md:grid-cols-2">
-                    <TagChipSelector presets={PRESET_TAGS.styleTags} value={slideTagText.styleTags} onChange={(v) => setSlideTagText({ ...slideTagText, styleTags: v })} placeholder="스타일 태그 직접 입력" />
-                    <TagChipSelector presets={PRESET_TAGS.elementTags} value={slideTagText.elementTags} onChange={(v) => setSlideTagText({ ...slideTagText, elementTags: v })} placeholder="구성요소 태그 직접 입력" />
-                  </div>
                   <Button className="md:col-span-2" onClick={addSlide} disabled={saving}>
                     <ImagePlus className="h-4 w-4" />
                     장표 저장
@@ -1225,11 +1211,9 @@ export default function Home() {
                       <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="장표 제목" value={editSlideDraft.title} onChange={(e) => setEditSlideDraft({ ...editSlideDraft, title: e.target.value })} />
                       <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="출처 문서명" value={editSlideDraft.sourceName} onChange={(e) => setEditSlideDraft({ ...editSlideDraft, sourceName: e.target.value })} />
                       <textarea className="min-h-16 w-full rounded-lg border px-3 py-2 text-sm" placeholder="메모" value={editSlideDraft.memo} onChange={(e) => setEditSlideDraft({ ...editSlideDraft, memo: e.target.value })} />
-                      <TagChipSelector presets={PRESET_TAGS.roleTags} value={editSlideTagText.roleTags} onChange={(v) => setEditSlideTagText({ ...editSlideTagText, roleTags: v })} placeholder="역할 태그" />
-                      <TagChipSelector presets={PRESET_TAGS.structureTags} value={editSlideTagText.structureTags} onChange={(v) => setEditSlideTagText({ ...editSlideTagText, structureTags: v })} placeholder="정보구조 태그" />
-                      <TagChipSelector presets={PRESET_TAGS.layoutTags} value={editSlideTagText.layoutTags} onChange={(v) => setEditSlideTagText({ ...editSlideTagText, layoutTags: v })} placeholder="레이아웃 태그" />
-                      <TagChipSelector presets={PRESET_TAGS.styleTags} value={editSlideTagText.styleTags} onChange={(v) => setEditSlideTagText({ ...editSlideTagText, styleTags: v })} placeholder="스타일 태그" />
-                      <TagChipSelector presets={PRESET_TAGS.elementTags} value={editSlideTagText.elementTags} onChange={(v) => setEditSlideTagText({ ...editSlideTagText, elementTags: v })} placeholder="구성요소 태그" />
+                      <TagChipSelector label="역할" presets={PRESET_TAGS.roleTags} value={editSlideTagText.roleTags} onChange={(v) => setEditSlideTagText({ ...editSlideTagText, roleTags: v })} placeholder="직접 입력" />
+                      <TagChipSelector label="정보구조" presets={PRESET_TAGS.structureTags} value={editSlideTagText.structureTags} onChange={(v) => setEditSlideTagText({ ...editSlideTagText, structureTags: v })} placeholder="직접 입력" />
+                      <TagChipSelector label="구성요소" presets={PRESET_TAGS.elementTags} value={editSlideTagText.elementTags} onChange={(v) => setEditSlideTagText({ ...editSlideTagText, elementTags: v })} placeholder="직접 입력" />
                       <Button className="w-full" onClick={saveSlideEdit} disabled={saving}>저장</Button>
                     </div>
                   ) : (
