@@ -14,12 +14,14 @@ import {
   ImagePlus,
   Loader2,
   Layers3,
+  Pencil,
   Plus,
   Search,
   Sparkles,
   Trash2,
   Upload,
-  Wand2
+  Wand2,
+  X
 } from "lucide-react";
 import { repository } from "@/lib/repository";
 import { seedData } from "@/lib/seed";
@@ -274,10 +276,10 @@ function elementInstruction(slide: SlideReference | undefined) {
 
 function buildPrompt(page: PaginationPage | null, slides: SlideReference[], styleTitle: string) {
   const primary = slides[0];
-  const secondary = slides.slice(1, 3);
-  const secondaryText = secondary.length
-    ? secondary.map((slide) => `- ${slide.title}: ${joinTags([...slide.structureTags, ...slide.layoutTags]) || slide.memo}`).join("\n")
-    : "- 보조 참고 없음";
+  const secondary = slides.slice(1, 3).filter((s) => s.memo || s.elementTags.length);
+  const secondarySection = secondary.length
+    ? `\n[ELEMENT HINTS FROM SECONDARY REFERENCES]\n주 레이아웃 구조는 유지하면서, 아래 표현 방식을 세부 요소에 선택적으로 활용한다.\n${secondary.map((s) => `- ${s.title}: ${s.memo || joinTags(s.elementTags)}`).join("\n")}`
+    : "";
 
   return `[ROLE]
 당신은 제안서/보고서용 PPT 장표를 설계하는 전문 디자이너입니다.
@@ -285,14 +287,10 @@ function buildPrompt(page: PaginationPage | null, slides: SlideReference[], styl
 [PAGE GOAL]
 ${page ? `${page.pageNumber}p. ${page.title}\n${page.description}` : "선택된 페이지 없음"}
 
-[PRIMARY LAYOUT DIRECTION]
-${primary ? `"${primary.title}" 레퍼런스를 주 구조로 참고한다.` : "선택된 레퍼런스가 없으므로 페이지 목적에 맞는 기본 보고서형 구조로 설계한다."}
+[LAYOUT]
+${primary ? `"${primary.title}" 레퍼런스를 주 구조로 참고한다.` : "페이지 목적에 맞는 기본 보고서형 구조로 설계한다."}
 ${layoutInstruction(primary, page)}
-${elementInstruction(primary)}
-
-[SECONDARY REFERENCES]
-${secondaryText}
-보조 레퍼런스는 세부 표현 방식만 참고하고, 주 구조를 흐트러뜨리지 않는다.
+${elementInstruction(primary)}${secondarySection}
 
 [VISUAL STYLE]
 ${styleTitle || (primary ? joinTags(primary.styleTags) : "보고서형, 정돈된 레이아웃, 과하지 않은 시각 요소")}
@@ -332,6 +330,40 @@ function TagPill({ children, active = false }: { children: React.ReactNode; acti
     <span className={`inline-flex rounded-full px-2.5 py-1 text-xs ${active ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-600"}`}>
       {children}
     </span>
+  );
+}
+
+const PRESET_TAGS: Record<keyof SlideTagText, string[]> = {
+  roleTags: ["전략", "문제정의", "운영전략", "콘텐츠예시", "도입/배경", "성과/결과", "실행계획", "소개"],
+  structureTags: ["병렬", "비교", "단계", "요약", "문제정의", "그리드", "표", "차트"],
+  layoutTags: ["카드형", "타임라인", "좌우분할", "프로세스", "그리드", "인포그래픽"],
+  styleTags: ["보고서형", "공공기관", "트렌디", "미니멀", "모던", "기업형"],
+  elementTags: ["아이콘", "표", "차트", "강조박스", "이미지", "화살표", "숫자강조"]
+};
+
+function TagChipSelector({ presets, value, onChange, placeholder }: {
+  presets: string[];
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  const selected = splitTags(value);
+  function toggle(tag: string) {
+    const next = selected.includes(tag) ? selected.filter((t) => t !== tag) : [...selected, tag];
+    onChange(joinTags(next));
+  }
+  return (
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap gap-1">
+        {presets.map((tag) => (
+          <button key={tag} type="button" onClick={() => toggle(tag)}
+            className={`rounded-full px-2 py-0.5 text-xs transition ${selected.includes(tag) ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
+            {tag}
+          </button>
+        ))}
+      </div>
+      <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} />
+    </div>
   );
 }
 
@@ -461,6 +493,9 @@ export default function Home() {
   const [aiStatus, setAiStatus] = useState("AI 분석 준비 상태 확인 중...");
   const [showAllSlides, setShowAllSlides] = useState(false);
   const [analyzingSlide, setAnalyzingSlide] = useState(false);
+  const [editingSlideId, setEditingSlideId] = useState<string | null>(null);
+  const [editSlideDraft, setEditSlideDraft] = useState<SlideDraft>(emptySlideDraft);
+  const [editSlideTagText, setEditSlideTagText] = useState(emptySlideTagText);
   const pageDescriptionRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -645,6 +680,43 @@ export default function Home() {
     }
   }
 
+  function startEditSlide(slide: SlideReference) {
+    setEditingSlideId(slide.id);
+    setEditSlideDraft({
+      title: slide.title,
+      sourceName: slide.sourceName,
+      pageNumber: slide.pageNumber,
+      roleTags: slide.roleTags,
+      structureTags: slide.structureTags,
+      layoutTags: slide.layoutTags,
+      styleTags: slide.styleTags,
+      elementTags: slide.elementTags,
+      memo: slide.memo
+    });
+    setEditSlideTagText({
+      roleTags: tagsToInput(slide.roleTags),
+      structureTags: tagsToInput(slide.structureTags),
+      layoutTags: tagsToInput(slide.layoutTags),
+      styleTags: tagsToInput(slide.styleTags),
+      elementTags: tagsToInput(slide.elementTags)
+    });
+  }
+
+  async function saveSlideEdit() {
+    if (!editingSlideId || !selectedSlide) return;
+    const tags = {
+      roleTags: splitTags(editSlideTagText.roleTags),
+      structureTags: splitTags(editSlideTagText.structureTags),
+      layoutTags: splitTags(editSlideTagText.layoutTags),
+      styleTags: splitTags(editSlideTagText.styleTags),
+      elementTags: splitTags(editSlideTagText.elementTags)
+    };
+    const updated: SlideReference = { ...selectedSlide, ...editSlideDraft, ...tags };
+    await commit({ ...data, slides: data.slides.map((s) => (s.id === editingSlideId ? updated : s)) });
+    setEditingSlideId(null);
+    setMessage("장표 레퍼런스를 수정했습니다.");
+  }
+
   async function addSlide() {
     if (!slideDraft.title.trim()) return setMessage("장표 제목은 필수입니다.");
     setSaving(true);
@@ -794,14 +866,9 @@ export default function Home() {
 
         <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)_380px]">
           <aside className="min-h-[720px] rounded-lg border bg-white">
-            <div className="flex items-center justify-between border-b p-4">
-              <div>
-                <div className="font-semibold">페이지네이션</div>
-                <div className="text-xs text-slate-500">GPTs 결과 붙여넣기/수정/추가/삭제</div>
-              </div>
-              <Button variant="outline" className="px-2" onClick={addSection}>
-                <Plus className="h-4 w-4" />
-              </Button>
+            <div className="border-b p-4">
+              <div className="font-semibold">페이지네이션</div>
+              <div className="text-xs text-slate-500">GPTs 결과 붙여넣기/수정/추가/삭제</div>
             </div>
             <div className="border-b p-3">
               <textarea
@@ -891,6 +958,9 @@ export default function Home() {
                     </div>
                   );
                 })}
+              <button className="mt-1 w-full rounded-md border border-dashed px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-50" onClick={addSection}>
+                + 섹션 추가
+              </button>
             </div>
           </aside>
 
@@ -1070,14 +1140,14 @@ export default function Home() {
                     </Button>
                     <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="장표 제목" value={slideDraft.title} onChange={(event) => setSlideDraft({ ...slideDraft, title: event.target.value })} />
                     <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="출처 문서명" value={slideDraft.sourceName} onChange={(event) => setSlideDraft({ ...slideDraft, sourceName: event.target.value })} />
-                    <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="역할 태그: 전략, 문제정의" value={slideTagText.roleTags} onChange={(event) => setSlideTagText({ ...slideTagText, roleTags: event.target.value })} />
-                    <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="정보구조 태그: 병렬, 비교" value={slideTagText.structureTags} onChange={(event) => setSlideTagText({ ...slideTagText, structureTags: event.target.value })} />
-                    <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="레이아웃 태그: 카드형, 타임라인" value={slideTagText.layoutTags} onChange={(event) => setSlideTagText({ ...slideTagText, layoutTags: event.target.value })} />
+                    <TagChipSelector presets={PRESET_TAGS.roleTags} value={slideTagText.roleTags} onChange={(v) => setSlideTagText({ ...slideTagText, roleTags: v })} placeholder="역할 태그 직접 입력" />
+                    <TagChipSelector presets={PRESET_TAGS.structureTags} value={slideTagText.structureTags} onChange={(v) => setSlideTagText({ ...slideTagText, structureTags: v })} placeholder="정보구조 태그 직접 입력" />
+                    <TagChipSelector presets={PRESET_TAGS.layoutTags} value={slideTagText.layoutTags} onChange={(v) => setSlideTagText({ ...slideTagText, layoutTags: v })} placeholder="레이아웃 태그 직접 입력" />
                   </div>
                   <textarea className="min-h-24 rounded-lg border px-3 py-2 text-sm md:col-span-2" placeholder="메모: 언제 쓰면 좋은 장표인지" value={slideDraft.memo} onChange={(event) => setSlideDraft({ ...slideDraft, memo: event.target.value })} />
                   <div className="grid gap-2 md:col-span-2 md:grid-cols-2">
-                    <input className="rounded-lg border px-3 py-2 text-sm" placeholder="스타일 태그: 보고서형, 공공기관" value={slideTagText.styleTags} onChange={(event) => setSlideTagText({ ...slideTagText, styleTags: event.target.value })} />
-                    <input className="rounded-lg border px-3 py-2 text-sm" placeholder="구성요소 태그: 아이콘, 표" value={slideTagText.elementTags} onChange={(event) => setSlideTagText({ ...slideTagText, elementTags: event.target.value })} />
+                    <TagChipSelector presets={PRESET_TAGS.styleTags} value={slideTagText.styleTags} onChange={(v) => setSlideTagText({ ...slideTagText, styleTags: v })} placeholder="스타일 태그 직접 입력" />
+                    <TagChipSelector presets={PRESET_TAGS.elementTags} value={slideTagText.elementTags} onChange={(v) => setSlideTagText({ ...slideTagText, elementTags: v })} placeholder="구성요소 태그 직접 입력" />
                   </div>
                   <Button className="md:col-span-2" onClick={addSlide} disabled={saving}>
                     <ImagePlus className="h-4 w-4" />
@@ -1131,9 +1201,14 @@ export default function Home() {
                   <div className="text-xs text-slate-500">레퍼런스 원본과 구조 요약</div>
                 </div>
                 {selectedSlide && (
-                  <Button variant="ghost" className="px-2 text-red-600 hover:bg-red-50" onClick={deleteSelectedSlide} disabled={saving}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <div className="flex gap-1">
+                    <Button variant="ghost" className="px-2" onClick={() => editingSlideId === selectedSlide.id ? setEditingSlideId(null) : startEditSlide(selectedSlide)} disabled={saving}>
+                      {editingSlideId === selectedSlide.id ? <X className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+                    </Button>
+                    <Button variant="ghost" className="px-2 text-red-600 hover:bg-red-50" onClick={deleteSelectedSlide} disabled={saving}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 )}
               </div>
               {selectedSlide ? (
@@ -1145,14 +1220,30 @@ export default function Home() {
                       <SlideMock slide={selectedSlide} />
                     </div>
                   )}
-                  <div className="mt-3 font-semibold">{selectedSlide.title}</div>
-                  <div className="mt-1 text-sm text-slate-500">{selectedSlide.sourceName}{selectedSlide.pageNumber ? ` · p.${selectedSlide.pageNumber}` : ""}</div>
-                  <p className="mt-3 text-sm leading-6 text-slate-600">{selectedSlide.memo}</p>
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {unique([...selectedSlide.roleTags, ...selectedSlide.structureTags, ...selectedSlide.layoutTags, ...selectedSlide.styleTags, ...selectedSlide.elementTags]).map((tag) => (
-                      <TagPill key={tag}>{tag}</TagPill>
-                    ))}
-                  </div>
+                  {editingSlideId === selectedSlide.id ? (
+                    <div className="mt-3 space-y-2">
+                      <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="장표 제목" value={editSlideDraft.title} onChange={(e) => setEditSlideDraft({ ...editSlideDraft, title: e.target.value })} />
+                      <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="출처 문서명" value={editSlideDraft.sourceName} onChange={(e) => setEditSlideDraft({ ...editSlideDraft, sourceName: e.target.value })} />
+                      <textarea className="min-h-16 w-full rounded-lg border px-3 py-2 text-sm" placeholder="메모" value={editSlideDraft.memo} onChange={(e) => setEditSlideDraft({ ...editSlideDraft, memo: e.target.value })} />
+                      <TagChipSelector presets={PRESET_TAGS.roleTags} value={editSlideTagText.roleTags} onChange={(v) => setEditSlideTagText({ ...editSlideTagText, roleTags: v })} placeholder="역할 태그" />
+                      <TagChipSelector presets={PRESET_TAGS.structureTags} value={editSlideTagText.structureTags} onChange={(v) => setEditSlideTagText({ ...editSlideTagText, structureTags: v })} placeholder="정보구조 태그" />
+                      <TagChipSelector presets={PRESET_TAGS.layoutTags} value={editSlideTagText.layoutTags} onChange={(v) => setEditSlideTagText({ ...editSlideTagText, layoutTags: v })} placeholder="레이아웃 태그" />
+                      <TagChipSelector presets={PRESET_TAGS.styleTags} value={editSlideTagText.styleTags} onChange={(v) => setEditSlideTagText({ ...editSlideTagText, styleTags: v })} placeholder="스타일 태그" />
+                      <TagChipSelector presets={PRESET_TAGS.elementTags} value={editSlideTagText.elementTags} onChange={(v) => setEditSlideTagText({ ...editSlideTagText, elementTags: v })} placeholder="구성요소 태그" />
+                      <Button className="w-full" onClick={saveSlideEdit} disabled={saving}>저장</Button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="mt-3 font-semibold">{selectedSlide.title}</div>
+                      <div className="mt-1 text-sm text-slate-500">{selectedSlide.sourceName}{selectedSlide.pageNumber ? ` · p.${selectedSlide.pageNumber}` : ""}</div>
+                      <p className="mt-3 text-sm leading-6 text-slate-600">{selectedSlide.memo}</p>
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {unique([...selectedSlide.roleTags, ...selectedSlide.structureTags, ...selectedSlide.layoutTags, ...selectedSlide.styleTags, ...selectedSlide.elementTags]).map((tag) => (
+                          <TagPill key={tag}>{tag}</TagPill>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </>
               ) : (
                 <div className="rounded-lg bg-slate-50 p-8 text-center text-sm text-slate-500">장표를 선택하세요.</div>
