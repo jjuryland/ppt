@@ -237,6 +237,24 @@ export const repository = {
     return updated;
   },
 
+  async deleteSlide(data: AppData, slideId: string): Promise<AppData> {
+    const updated: AppData = {
+      ...data,
+      slides: data.slides.filter((slide) => slide.id !== slideId),
+      pages: data.pages.map((page) => ({
+        ...page,
+        selectedSlideIds: page.selectedSlideIds.filter((id) => id !== slideId)
+      }))
+    };
+
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from("slide_references").delete().eq("id", slideId);
+      if (error) throw error;
+    }
+    writeLocal(updated);
+    return updated;
+  },
+
   createSection(data: AppData): AppData {
     return {
       ...data,

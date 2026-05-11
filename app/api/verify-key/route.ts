@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 
 export async function POST(request: Request) {
-  const { apiKey } = await request.json().catch(() => ({ apiKey: "" }));
-  const key = process.env.OPENAI_API_KEY || apiKey;
-  const mode = process.env.OPENAI_API_KEY ? "server" : "user";
+  await request.json().catch(() => ({}));
+  const key = process.env.OPENAI_API_KEY;
 
-  if (!key || typeof key !== "string") {
-    return NextResponse.json({ error: "OpenAI API 키가 필요합니다." }, { status: 400 });
+  if (!key) {
+    return NextResponse.json({ error: "서버 OPENAI_API_KEY가 필요합니다." }, { status: 400 });
   }
 
   const response = await fetch("https://api.openai.com/v1/models", {
@@ -19,5 +18,5 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "API 키를 확인하지 못했습니다." }, { status: response.status });
   }
 
-  return NextResponse.json({ ok: true, mode });
+  return NextResponse.json({ ok: true, mode: "server" });
 }

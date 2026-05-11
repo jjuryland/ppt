@@ -37,11 +37,11 @@ async function fileToDataUrl(file: File) {
 
 export async function POST(request: Request) {
   const formData = await request.formData();
-  const apiKey = process.env.OPENAI_API_KEY || String(formData.get("apiKey") || "");
+  const apiKey = process.env.OPENAI_API_KEY;
   const file = formData.get("file");
 
   if (!apiKey) {
-    return NextResponse.json({ error: "서버 OPENAI_API_KEY 또는 임시 API 키가 필요합니다." }, { status: 400 });
+    return NextResponse.json({ error: "서버 OPENAI_API_KEY가 필요합니다." }, { status: 400 });
   }
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "분석할 이미지가 필요합니다." }, { status: 400 });
