@@ -336,9 +336,9 @@ function TagPill({ children, active = false }: { children: React.ReactNode; acti
 }
 
 const PRESET_TAGS: Record<keyof SlideTagText, string[]> = {
-  roleTags: ["표지", "배경/도입", "문제정의", "전략", "실행계획", "성과/결과", "콘텐츠예시"],
-  structureTags: ["병렬", "비교", "단계", "그리드", "요약", "단일메시지"],
-  elementTags: ["카드", "표", "차트", "아이콘", "타임라인", "이미지", "강조박스", "화살표"]
+  roleTags: ["표지", "목차", "배경/도입", "문제정의", "전략", "실행계획", "성과/결과", "콘텐츠예시", "팀/조직소개", "예산/비용"],
+  structureTags: ["병렬", "비교", "단계", "그리드", "요약", "단일메시지", "매트릭스", "계층", "목록"],
+  elementTags: ["카드", "표", "차트", "아이콘", "타임라인", "이미지", "강조박스", "화살표", "숫자강조", "인용구", "다이어그램"]
 };
 
 function TagChipSelector({ label, presets, value, onChange, placeholder }: {
@@ -638,14 +638,29 @@ export default function Home() {
 4p: 실행 로드맵 - 단계별 일정과 담당 역할을 타임라인으로 정리`);
   }
 
-  function handleSlidePaste(event: React.ClipboardEvent<HTMLLabelElement>) {
-    const file = Array.from(event.clipboardData.files).find((item) => item.type.startsWith("image/"));
-    if (!file) return;
-    event.preventDefault();
-    const pastedFile = new File([file], `pasted-slide-${Date.now()}.${file.type.split("/")[1] || "png"}`, { type: file.type });
+  function applyPastedImage(clipboardData: DataTransfer) {
+    const item = Array.from(clipboardData.items).find((i) => i.type.startsWith("image/"));
+    const raw = item?.getAsFile();
+    if (!raw) return false;
+    const pastedFile = new File([raw], `pasted-slide-${Date.now()}.${raw.type.split("/")[1] || "png"}`, { type: raw.type });
     setSlideFile(pastedFile);
     setMessage("붙여넣은 이미지를 장표 등록에 넣었습니다.");
+    return true;
   }
+
+  function handleSlidePaste(event: React.ClipboardEvent<HTMLLabelElement>) {
+    if (applyPastedImage(event.clipboardData)) event.preventDefault();
+  }
+
+  useEffect(() => {
+    if (tab !== "library") return;
+    function onGlobalPaste(event: ClipboardEvent) {
+      if (!event.clipboardData) return;
+      applyPastedImage(event.clipboardData);
+    }
+    window.addEventListener("paste", onGlobalPaste);
+    return () => window.removeEventListener("paste", onGlobalPaste);
+  }, [tab]);
 
   function toggleFilterTag(tag: string) {
     setSelectedFilterTags((prev) => (prev.includes(tag) ? prev.filter((item) => item !== tag) : [...prev, tag]));
@@ -1074,7 +1089,9 @@ export default function Home() {
                       onClick={() => setSelectedSlideId(slide.id)}
                       className={`rounded-lg border p-3 text-left transition hover:-translate-y-0.5 hover:shadow-sm ${selectedSlideId === slide.id ? "border-slate-950 ring-1 ring-slate-950" : "bg-white"}`}
                     >
-                      <SlideMock slide={slide} />
+                      {slide.imageUrl
+                        ? <img src={slide.imageUrl} alt={slide.title} className="aspect-video w-full rounded-md border border-slate-200 object-contain bg-white" />
+                        : <SlideMock slide={slide} />}
                       <div className="mt-3 flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="truncate text-sm font-semibold">{slide.title}</div>
@@ -1200,12 +1217,6 @@ export default function Home() {
               {selectedSlide ? (
                 <>
                   <OriginalSlideImage slide={selectedSlide} />
-                  {selectedSlide.imageUrl && (
-                    <div className="mt-3">
-                      <div className="mb-1 text-xs font-semibold text-slate-500">구조 썸네일</div>
-                      <SlideMock slide={selectedSlide} />
-                    </div>
-                  )}
                   {editingSlideId === selectedSlide.id ? (
                     <div className="mt-3 space-y-2">
                       <input className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="장표 제목" value={editSlideDraft.title} onChange={(e) => setEditSlideDraft({ ...editSlideDraft, title: e.target.value })} />

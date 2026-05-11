@@ -4,8 +4,6 @@ type Analysis = {
   title: string;
   roleTags: string[];
   structureTags: string[];
-  layoutTags: string[];
-  styleTags: string[];
   elementTags: string[];
   memo: string;
 };
@@ -14,8 +12,6 @@ const fallbackAnalysis: Analysis = {
   title: "",
   roleTags: [],
   structureTags: [],
-  layoutTags: [],
-  styleTags: [],
   elementTags: [],
   memo: ""
 };
@@ -71,11 +67,12 @@ export async function POST(request: Request) {
             {
               type: "input_text",
               text:
-                "이 PPT 장표 이미지를 레퍼런스 관리용으로 분석하세요. 반드시 JSON만 반환하세요. " +
-                "필드: title(string), roleTags(string[]), structureTags(string[]), layoutTags(string[]), styleTags(string[]), elementTags(string[]), memo(string). " +
-                "태그는 한국어의 짧은 명사로 2~5개씩 작성하세요. " +
-                "structureTags는 가능한 한 병렬, 비교, 단계, 요약, 문제정의, 그리드 중에서 고르세요. " +
-                "layoutTags는 가능한 한 카드형, 좌우분할, 타임라인, 표, 차트, 썸네일 중에서 고르세요."
+                "이 PPT 장표 이미지를 레퍼런스 관리용으로 분석하세요. 반드시 JSON만 반환하세요.\n" +
+                "필드: title(string), roleTags(string[]), structureTags(string[]), elementTags(string[]), memo(string)\n" +
+                "roleTags: 이 장표가 쓰이는 페이지 목적. 다음 중에서 고르세요: 표지, 목차, 배경/도입, 문제정의, 전략, 실행계획, 성과/결과, 콘텐츠예시, 팀/조직소개, 예산/비용\n" +
+                "structureTags: 정보가 배치되는 방식. 다음 중에서 고르세요: 병렬, 비교, 단계, 그리드, 요약, 단일메시지, 매트릭스, 계층, 목록\n" +
+                "elementTags: 장표에 들어가는 시각 요소. 다음 중에서 고르세요: 카드, 표, 차트, 아이콘, 타임라인, 이미지, 강조박스, 화살표, 숫자강조, 인용구, 다이어그램\n" +
+                "memo: 이 장표를 언제 쓰면 좋은지 1~2문장으로 설명"
             },
             {
               type: "input_image",
